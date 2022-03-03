@@ -37,13 +37,13 @@ Use `stac planet-nicfi --help` to see all subcommands and options.
 
 ```
 stac planetnicfi create-collection visual visual-template.json \
-   --thumbnail="https://ai4edatasetspublicassets.blob.core.windows.net/assets/pc_thumbnails/sentinel-2.png" \
+   --thumbnail="https://planet-pulse-assets-production.s3.amazonaws.com/uploads/2020/09/nicfi_tropics_basemap_map_d1.jpg" \
    --extra-field "msft:short_description=Planet’s high-resolution, analysis-ready mosaics of the world’s tropics" \
    --extra-field "msft:storage_account=planet" \
    --extra-field "msft:container=nicfi"
 
 stac planetnicfi create-collection analytic analytic-template.json \
-   --thumbnail="https://ai4edatasetspublicassets.blob.core.windows.net/assets/pc_thumbnails/sentinel-2.png" \
+   --thumbnail="https://planet-pulse-assets-production.s3.amazonaws.com/uploads/2020/09/nicfi_tropics_basemap_map_d1.jpg" \
    --extra-field "msft:short_description=Planet’s high-resolution, analysis-ready mosaics of the world’s tropics" \
    --extra-field "msft:storage_account=planet" \
    --extra-field "msft:container=nicfi"

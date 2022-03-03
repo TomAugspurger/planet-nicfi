@@ -75,6 +75,18 @@ def create_collection(
             media_type=PDF_MEDIA_TYPE,
             title="Participant License Agreement.",
         ),
+        pystac.Link(
+            rel="documentation",
+            target="https://www.planet.com/nicfi/",
+            media_type="text/html",
+            title="NICFI Program - Satellite Imagery and Monitoring | Planet",
+        ),
+        pystac.Link(
+            rel="documentation",
+            target="https://developers.planet.com/nicfi/",
+            media_type="text/html",
+            title="NICFI Program Resource Center",
+        ),
     ]
 
     collection = pystac.Collection(
@@ -140,6 +152,7 @@ def create_collection(
     }
     collection.summaries.add("gsd", [4.77])
     collection.summaries.add("eo:bands", eo_bands[kind])
+    collection.summaries.add("planet-nicfi:cadence", ["biannual", "monthly"])
 
     if thumbnail is not None:
         # TODO: guess media type?
@@ -190,10 +203,16 @@ def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info
     end_datetime = dateutil.parser.parse(mosaic["last_acquired"])
     timestamp = start_datetime + (end_datetime - start_datetime) / 2
 
+    if start_datetime > datetime.datetime(2020, 9, 1, tzinfo=datetime.timezone.utc):
+        cadence = "monthly"
+    else:
+        cadence = "biannual"
+
     properties = {
         "start_datetime": mosaic["first_acquired"],
         "end_datetime": mosaic["last_acquired"],
         "gsd": 4.77,
+        "planet-nicfi:cadence": cadence,
     }
     item_id = f"{mosaic['id']}-{item_info['id']}"
 
