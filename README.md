@@ -6,7 +6,7 @@
 - Name: planet-nicfi
 - Package: `stactools.planet_nicfi`
 - PyPI: https://pypi.org/project/stactools-planet-nicfi/
-- Owner: @githubusername
+- Owner: @TomAugspurger
 - Dataset homepage: http://example.com
 - STAC extensions used:
   - [proj](https://github.com/stac-extensions/projection/)

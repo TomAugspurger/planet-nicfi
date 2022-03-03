@@ -160,8 +160,8 @@ def create_collection(
 
 
 def create_item(
-    asset_href, mosaic_info_href, quad_info_href, transform_href=lambda x: x
-):
+    asset_href: str, mosaic_info_href: str, quad_info_href: str, transform_href=lambda x: x
+) -> pystac.Item:
     """
     Create a STAC item for a quad item from `mosaic`.
     """
@@ -182,9 +182,10 @@ def create_item(
     r_image = requests.get(transform_href(asset_href))
     r_image.raise_for_status()
     image = r_image.content
+    return create_item_from_data(asset_href, image, mosaic, item_info)
 
-    # Done with I/O
 
+def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info: dict) -> pystac.Item:
     start_datetime = dateutil.parser.parse(mosaic["first_acquired"])
     end_datetime = dateutil.parser.parse(mosaic["last_acquired"])
     timestamp = start_datetime + (end_datetime - start_datetime) / 2
