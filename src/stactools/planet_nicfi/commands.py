@@ -49,6 +49,7 @@ def create_planetnicfi_command(cli):
     @planetnicfi.command("create-item", short_help="Create a STAC item")
     @click.argument("source")
     @click.argument("destination")
+    @click.argument("planet_api_key")
     def create_item_command(source: str, destination: str):
         """Creates a STAC Item
 

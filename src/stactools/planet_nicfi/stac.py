@@ -1,5 +1,9 @@
-import logging
+from __future__ import annotations
+
+from typing import Any
 import datetime
+import logging
+import urllib.parse
 
 import dateutil
 import pystac
@@ -12,23 +16,28 @@ import requests
 
 logger = logging.getLogger(__name__)
 PDF_MEDIA_TYPE = "application/pdf"
+API = "https://api.planet.com/basemaps/v1/mosaics"
 
 BANDS = {
     "analytic": [
-            pystac.extensions.eo.Band({"name": "Blue", "common_name": "blue"}),
-            pystac.extensions.eo.Band({"name": "Green", "common_name": "green"}),
-            pystac.extensions.eo.Band({"name": "Red", "common_name": "red"}),
-            pystac.extensions.eo.Band({"name": "NIR", "common_name": "nir", "description": "near-infrared"}),
+        pystac.extensions.eo.Band({"name": "Blue", "common_name": "blue"}),
+        pystac.extensions.eo.Band({"name": "Green", "common_name": "green"}),
+        pystac.extensions.eo.Band({"name": "Red", "common_name": "red"}),
+        pystac.extensions.eo.Band(
+            {"name": "NIR", "common_name": "nir", "description": "near-infrared"}
+        ),
     ],
     "visual": [
-            pystac.extensions.eo.Band({"name": "Red", "common_name": "red"}),
-            pystac.extensions.eo.Band({"name": "Green", "common_name": "green"}),
-            pystac.extensions.eo.Band({"name": "Blue", "common_name": "blue"}),
-        ]
+        pystac.extensions.eo.Band({"name": "Red", "common_name": "red"}),
+        pystac.extensions.eo.Band({"name": "Green", "common_name": "green"}),
+        pystac.extensions.eo.Band({"name": "Blue", "common_name": "blue"}),
+    ],
 }
 
 
-def create_collection(kind) -> pystac.Collection:
+def create_collection(
+    kind: str, thumbnail: str | None = None, extra_fields: dict[str, Any] | None = None
+) -> pystac.Collection:
     """Create a STAC Collection
 
     This function includes logic to extract all relevant metadata from
@@ -78,7 +87,7 @@ def create_collection(kind) -> pystac.Collection:
         extent=pystac.Extent(
             pystac.SpatialExtent([[-180.0, -34.161818157002, 180.0, 30.145127179625]]),
             pystac.TemporalExtent(
-                [datetime.datetime(2015, 12, 1, tzinfo=datetime.timezone.utc), None]
+                [[datetime.datetime(2015, 12, 1, tzinfo=datetime.timezone.utc), None]]
             ),
         ),
     )
@@ -127,22 +136,49 @@ def create_collection(kind) -> pystac.Collection:
             {"name": "Red", "common_name": "red", "description": "visible red"},
             {"name": "Green", "common_name": "green", "description": "visible green"},
             {"name": "Blue", "common_name": "blue", "description": "visible blue"},
-        ]
+        ],
     }
     collection.summaries.add("gsd", [4.77])
     collection.summaries.add("eo:bands", eo_bands[kind])
 
+    if thumbnail is not None:
+        # TODO: guess media type?
+        collection.add_asset(
+            "thumbnail",
+            pystac.Asset(
+                thumbnail,
+                title="thumbnail",
+                roles=[thumbnail],
+                media_type=pystac.MediaType.PNG,
+            ),
+        )
+
+    if extra_fields:
+        collection.extra_fields.update(extra_fields)
+
     return collection
 
 
-def create_item(asset_href, mosaic, item_info, transform_href=lambda x: x):
+def create_item(
+    asset_href, mosaic_info_href, quad_info_href, transform_href=lambda x: x
+):
     """
     Create a STAC item for a quad item from `mosaic`.
     """
-    # TODO: the item should include the mosaic type (analytical, mosaic)
-    # blob_name, thumbnail_name = copy_item(
-    #     mosaic, item_info, redownload=redownload, overwrite=overwrite
-    # )
+    session = requests.Session()
+    retries = requests.adapters.Retry(
+        total=5, backoff_factor=1, status_forcelist=[502, 503, 504]
+    )
+    session.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
+
+    r_mosaic = session.get(mosaic_info_href)
+    r_mosaic.raise_for_status()
+    mosaic = r_mosaic.json()
+
+    r_quad = session.get(quad_info_href)
+    r_quad.raise_for_status()
+    item_info = r_quad.json()
+
     r_image = requests.get(transform_href(asset_href))
     r_image.raise_for_status()
     image = r_image.content
@@ -196,6 +232,7 @@ def create_item(asset_href, mosaic, item_info, transform_href=lambda x: x):
     item.add_link(
         pystac.Link(
             "via",
+            # use .split to strip out the API key
             target=mosaic["_links"]["_self"].split("?")[0],
             media_type=pystac.MediaType.JSON,
             title="Planet Mosaic",
@@ -206,4 +243,5 @@ def create_item(asset_href, mosaic, item_info, transform_href=lambda x: x):
     kind = "analytic" if "analytic" in mosaic["name"] else "visual"
     ext.bands = BANDS[kind]
 
+    item.validate()
     return item

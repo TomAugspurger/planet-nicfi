@@ -1,3 +1,4 @@
+import json
 import os
 import azure.storage.blob
 import datetime
@@ -54,13 +55,22 @@ def mosaic_info(mosaic_name, planet_api_key):
 
 
 def name_blob(mosaic_info, item_info):
-    return f"{mosaic_info['name']}/{item_info['id']}/data.tif"
+    prefix = "analytic" if "analytic" in mosaic_info["name"] else "visual"
+    return f"{prefix}/{mosaic_info['id']}/{item_info['id']}/data.tif"
 
 
 def name_thumbnail(mosaic_info, item_info):
     return str(
         pathlib.Path(name_blob(mosaic_info, item_info)).with_name("thumbnail.png")
     )
+
+
+def name_mosaic_info(mosaic_info):
+    return f"metadata/mosaic/{mosaic_info['id']}.json"
+
+
+def name_item_info(mosaic_info, item_info):
+    return f"metadata/quad/{mosaic_info['id']}/{item_info['id']}.json"
 
 
 def copy_item(mosaic, item_info, redownload=False, overwrite=True, credential=None):
@@ -70,9 +80,11 @@ def copy_item(mosaic, item_info, redownload=False, overwrite=True, credential=No
     )
     blob_name = name_blob(mosaic, item_info)
     thumbnail_name = name_thumbnail(mosaic, item_info)
+    mosaic_name = name_mosaic_info(mosaic)
+    quad_name = name_item_info(mosaic, item_info)
+
     with container_client.get_blob_client(blob_name) as bc:
-        exists = bc.exists()
-        if redownload or not exists:
+        if redownload or not bc.exists():
             r_image = requests.get(item_info["_links"]["download"])
             r_image.raise_for_status()
             image = r_image.content
@@ -86,8 +98,7 @@ def copy_item(mosaic, item_info, redownload=False, overwrite=True, credential=No
             )
 
     with container_client.get_blob_client(thumbnail_name) as bc:
-        exists = bc.exists()
-        if redownload or not exists:
+        if redownload or not bc.exists():
             r_thumbnail = requests.get(item_info["_links"]["thumbnail"])
             r_thumbnail.raise_for_status()
             thumbnail = r_thumbnail.content
@@ -98,7 +109,28 @@ def copy_item(mosaic, item_info, redownload=False, overwrite=True, credential=No
                 ),
                 overwrite=overwrite,
             )
-    return blob_name, thumbnail_name
+
+    with container_client.get_blob_client(mosaic_name) as bc:
+        if redownload or not bc.exists():
+            bc.upload_blob(
+                json.dumps(mosaic).encode(),
+                content_settings=azure.storage.blob.ContentSettings(
+                    str(pystac.MediaType.JSON)
+                ),
+                overwrite=overwrite,
+            )
+
+    with container_client.get_blob_client(quad_name) as bc:
+        if redownload or not bc.exists():
+            bc.upload_blob(
+                json.dumps(item_info).encode(),
+                content_settings=azure.storage.blob.ContentSettings(
+                    str(pystac.MediaType.JSON)
+                ),
+                overwrite=overwrite,
+            )
+
+    return blob_name, thumbnail_name, mosaic_name, quad_name
 
 
 def consume(session, request, key="items"):

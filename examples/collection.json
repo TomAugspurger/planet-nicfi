@@ -1,0 +1,106 @@
+{
+  "type": "Collection",
+  "id": "planet-nicfi-visual",
+  "stac_version": "1.0.0",
+  "description": "{{ description.md }}",
+  "links": [
+    {
+      "rel": "root",
+      "href": "./collection.json",
+      "type": "application/json",
+      "title": "Planet NICFI visual"
+    },
+    {
+      "rel": "license",
+      "href": "https://assets.planet.com/docs/Planet_ParticipantLicenseAgreement_NICFI.pdf",
+      "type": "application/pdf",
+      "title": "Participant License Agreement."
+    },
+    {
+      "rel": "documentation",
+      "href": "https://assets.planet.com/docs/NICFI_UserGuidesFAQ.pdf",
+      "type": "application/pdf",
+      "title": "Participant License Agreement."
+    },
+    {
+      "rel": "self",
+      "href": "/home/taugspurger/src/stactools-packages/planet-nicfi/examples/collection.json",
+      "type": "application/json"
+    }
+  ],
+  "stac_extensions": [
+    "https://stac-extensions.github.io/item-assets/v1.0.0/schema.json"
+  ],
+  "item_assets": {
+    "thumbnail": {
+      "type": "image/png",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Thumbnail"
+    },
+    "data": {
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": [
+        "data"
+      ],
+      "title": "Data",
+      "description": "a 'true-colour' representation of spatially accurate data with minimized haze, illumination, and topographic effects"
+    }
+  },
+  "title": "Planet NICFI visual",
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -180.0,
+          -34.161818157002,
+          180.0,
+          30.145127179625
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2015-12-01T00:00:00Z",
+          null
+        ]
+      ]
+    }
+  },
+  "license": "proprietary",
+  "providers": [
+    {
+      "name": "Planet",
+      "description": "Contact Planet at [planet.com/contact-sales](https://www.planet.com/contact-sales/)",
+      "roles": [
+        "producer",
+        "processor"
+      ],
+      "url": "http://planet.com"
+    }
+  ],
+  "summaries": {
+    "gsd": [
+      4.77
+    ],
+    "eo:bands": [
+      {
+        "name": "Red",
+        "common_name": "red",
+        "description": "visible red"
+      },
+      {
+        "name": "Green",
+        "common_name": "green",
+        "description": "visible green"
+      },
+      {
+        "name": "Blue",
+        "common_name": "blue",
+        "description": "visible blue"
+      }
+    ]
+  }
+}
