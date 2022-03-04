@@ -208,11 +208,14 @@ def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info
     else:
         cadence = "biannual"
 
+    kind = "analytic" if "analytic" in mosaic["name"] else "visual"
+
     properties = {
         "start_datetime": mosaic["first_acquired"],
         "end_datetime": mosaic["last_acquired"],
         "gsd": 4.77,
         "planet-nicfi:cadence": cadence,
+        # "planet-nicfi:kind": kind,
     }
     item_id = f"{mosaic['id']}-{item_info['id']}"
 
@@ -260,7 +263,6 @@ def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info
     )
 
     ext = pystac.extensions.eo.EOExtension.ext(item.assets["data"], add_if_missing=True)
-    kind = "analytic" if "analytic" in mosaic["name"] else "visual"
     ext.bands = BANDS[kind]
 
     item.validate()

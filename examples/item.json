@@ -1,0 +1,266 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "e919a346-9807-4f4e-a2bb-2170d421cf6f-680-1018",
+  "properties": {
+    "start_datetime": "2020-09-01T00:00:00.000Z",
+    "end_datetime": "2020-10-01T00:00:00.000Z",
+    "gsd": 4.77,
+    "planet-nicfi:cadence": "biannual",
+    "proj:epsg": 3857,
+    "proj:geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [
+            -6731350.457964594,
+            -97839.39618517831
+          ],
+          [
+            -6731350.457964594,
+            -117407.27542346567
+          ],
+          [
+            -6711782.578726307,
+            -117407.27542346567
+          ],
+          [
+            -6711782.578726307,
+            -97839.39618517831
+          ],
+          [
+            -6731350.457964594,
+            -97839.39618517831
+          ]
+        ]
+      ]
+    },
+    "proj:bbox": [
+      -6731350.457964594,
+      -117407.27542346567,
+      -6711782.578726307,
+      -97839.39618517831
+    ],
+    "proj:shape": [
+      4096,
+      4096
+    ],
+    "proj:transform": [
+      4.77731426716,
+      0.0,
+      -6731350.457964594,
+      0.0,
+      -4.77731426716,
+      -97839.39618517831,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "datetime": "2020-09-16T00:00:00Z"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -60.468749991545344,
+          -0.8788717826541511
+        ],
+        [
+          -60.468749991545344,
+          -1.0546279420732092
+        ],
+        [
+          -60.292968741569766,
+          -1.0546279420732092
+        ],
+        [
+          -60.292968741569766,
+          -0.8788717826541511
+        ],
+        [
+          -60.468749991545344,
+          -0.8788717826541511
+        ]
+      ]
+    ]
+  },
+  "links": [
+    {
+      "rel": "via",
+      "href": "https://api.planet.com/basemaps/v1/mosaics/e919a346-9807-4f4e-a2bb-2170d421cf6f/quads/680-1018",
+      "type": "application/json",
+      "title": "Planet Item"
+    },
+    {
+      "rel": "via",
+      "href": "https://api.planet.com/basemaps/v1/mosaics/e919a346-9807-4f4e-a2bb-2170d421cf6f",
+      "type": "application/json",
+      "title": "Planet Mosaic"
+    }
+  ],
+  "assets": {
+    "data": {
+      "href": "https://planet.blob.core.windows.net/nicfi/visual/e919a346-9807-4f4e-a2bb-2170d421cf6f/680-1018/data.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "raster:bands": [
+        {
+          "data_type": "uint8",
+          "scale": 1.0,
+          "offset": 0.0,
+          "sampling": "area",
+          "statistics": {
+            "mean": 29.7156400680542,
+            "minimum": 0,
+            "maximum": 190,
+            "stddev": 6.010975220941867,
+            "valid_percent": 100.0
+          },
+          "histogram": {
+            "count": 11,
+            "min": 0.0,
+            "max": 190.0,
+            "buckets": [
+              16826,
+              968603,
+              58929,
+              3083,
+              540,
+              284,
+              127,
+              125,
+              46,
+              13
+            ]
+          }
+        },
+        {
+          "data_type": "uint8",
+          "scale": 1.0,
+          "offset": 0.0,
+          "sampling": "area",
+          "statistics": {
+            "mean": 42.379395484924316,
+            "minimum": 0,
+            "maximum": 165,
+            "stddev": 5.510523697531891,
+            "valid_percent": 100.0
+          },
+          "histogram": {
+            "count": 11,
+            "min": 0.0,
+            "max": 165.0,
+            "buckets": [
+              4530,
+              19398,
+              961625,
+              61590,
+              861,
+              231,
+              156,
+              120,
+              50,
+              15
+            ]
+          }
+        },
+        {
+          "data_type": "uint8",
+          "scale": 1.0,
+          "offset": 0.0,
+          "sampling": "area",
+          "statistics": {
+            "mean": 12.818681716918945,
+            "minimum": 0,
+            "maximum": 138,
+            "stddev": 5.259700956810573,
+            "valid_percent": 100.0
+          },
+          "histogram": {
+            "count": 11,
+            "min": 0.0,
+            "max": 138.0,
+            "buckets": [
+              615040,
+              426341,
+              6091,
+              473,
+              202,
+              185,
+              128,
+              90,
+              20,
+              6
+            ]
+          }
+        },
+        {
+          "data_type": "uint8",
+          "scale": 1.0,
+          "offset": 0.0,
+          "sampling": "area",
+          "statistics": {
+            "mean": 255.0,
+            "minimum": 255,
+            "maximum": 255,
+            "stddev": 0.0,
+            "valid_percent": 100.0
+          },
+          "histogram": {
+            "count": 11,
+            "min": 254.5,
+            "max": 255.5,
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1048576,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "eo:bands": [
+        {
+          "name": "Red",
+          "common_name": "red"
+        },
+        {
+          "name": "Green",
+          "common_name": "green"
+        },
+        {
+          "name": "Blue",
+          "common_name": "blue"
+        }
+      ],
+      "roles": [
+        "data"
+      ]
+    },
+    "thumbnail": {
+      "href": "https://planet.blob.core.windows.net/nicfi/visual/e919a346-9807-4f4e-a2bb-2170d421cf6f/680-1018/thumbnail.png",
+      "type": "image/png",
+      "title": "Thumbnail",
+      "roles": [
+        "thumbnail"
+      ]
+    }
+  },
+  "bbox": [
+    -60.468749991545344,
+    -1.0546279420732092,
+    -60.292968741569766,
+    -0.8788717826541511
+  ],
+  "stac_extensions": [
+    "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
+    "https://stac-extensions.github.io/eo/v1.0.0/schema.json"
+  ]
+}
