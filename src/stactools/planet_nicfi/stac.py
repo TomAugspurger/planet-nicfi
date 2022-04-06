@@ -62,7 +62,7 @@ def create_collection(
             url="http://planet.com",
             roles=[
                 pystac.ProviderRole.PROCESSOR,
-                pystac.ProviderRole.PROCESSOR,
+                pystac.ProviderRole.PRODUCER,
                 pystac.ProviderRole.LICENSOR,
             ]
         )
@@ -182,13 +182,17 @@ def create_collection(
             pystac.Asset(
                 thumbnail,
                 title="thumbnail",
-                roles=[thumbnail],
+                roles=["thumbnail"],
                 media_type=pystac.MediaType.PNG,
             ),
         )
 
     if extra_fields:
         collection.extra_fields.update(extra_fields)
+
+    collection.remove_links(pystac.RelType.SELF)
+    collection.remove_links(pystac.RelType.ROOT)
+    collection.validate()
 
     return collection
 

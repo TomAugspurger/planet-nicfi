@@ -1,6 +1,6 @@
 visual-template.json: src
 	stac planetnicfi create-collection visual visual-template.json \
-	   --thumbnail="https://planet-pulse-assets-production.s3.amazonaws.com/uploads/2020/09/nicfi_tropics_basemap_map_d1.jpg" \
+	   --thumbnail="https://ai4edatasetspublicassets.blob.core.windows.net/assets/pc_thumbnails/planet-nicfi-analytic-thumbnail.png" \
 	   --extra-field "msft:short_description=Planet's high-resolution, analysis-ready mosaics of the world's tropics" \
 	   --extra-field "msft:storage_account=planet" \
 	   --extra-field "msft:container=nicfi" \
@@ -8,7 +8,7 @@ visual-template.json: src
 
 analytic-template.json: src/stactools/planet_nicfi
 	stac planetnicfi create-collection analytic analytic-template.json \
-	   --thumbnail="https://planet-pulse-assets-production.s3.amazonaws.com/uploads/2020/09/nicfi_tropics_basemap_map_d1.jpg" \
+	   --thumbnail="https://ai4edatasetspublicassets.blob.core.windows.net/assets/pc_thumbnails/planet-nicfi-analytic-thumbnail.png" \
 	   --extra-field "msft:short_description=Planet's high-resolution, analysis-ready mosaics of the world's tropics" \
 	   --extra-field "msft:storage_account=planet" \
 	   --extra-field "msft:container=nicfi" \
