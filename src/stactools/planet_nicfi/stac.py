@@ -36,8 +36,8 @@ def create_collection(
     kind: str,
     thumbnail: str | None = None,
     extra_fields: dict[str, Any] | None = None,
-    extra_links: dict[str, Any] | None = None,
-    extra_providers: dict[str, Any] | None = None,
+    extra_links: list[dict[str, Any]] | None = None,
+    extra_providers: list[dict[str, Any]] | None = None,
 ) -> pystac.Collection:
     """Create a STAC Collection
 
@@ -60,7 +60,11 @@ def create_collection(
                 "[planet.com/contact-sales](https://www.planet.com/contact-sales/)"
             ),
             url="http://planet.com",
-            roles=["producer", "processor", "licensor"],
+            roles=[
+                pystac.ProviderRole.PROCESSOR,
+                pystac.ProviderRole.PROCESSOR,
+                pystac.ProviderRole.LICENSOR,
+            ]
         )
     ]
     if extra_providers:

@@ -74,21 +74,21 @@ def create_planetnicfi_command(cli):
         collection.save_object()
         return None
 
-    @planetnicfi.command("create-item", short_help="Create a STAC item")
-    @click.argument("source")
-    @click.argument("destination")
-    @click.argument("planet_api_key")
-    def create_item_command(source: str, destination: str):
-        """Creates a STAC Item
+    # @planetnicfi.command("create-item", short_help="Create a STAC item")
+    # @click.argument("source")
+    # @click.argument("destination")
+    # @click.argument("planet_api_key")
+    # def create_item_command(source: str, destination: str):
+    #     """Creates a STAC Item
 
-        Args:
-            source (str): HREF of the Asset associated with the Item
-            destination (str): An HREF for the STAC Collection
-        """
-        item = stac.create_item(source)
+    #     Args:
+    #         source (str): HREF of the Asset associated with the Item
+    #         destination (str): An HREF for the STAC Collection
+    #     """
+    #     item = stac.create_item(source)
 
-        item.save_object(dest_href=destination)
+    #     item.save_object(dest_href=destination)
 
-        return None
+    #     return None
 
     return planetnicfi
