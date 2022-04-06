@@ -36,7 +36,11 @@ BANDS = {
 
 
 def create_collection(
-    kind: str, thumbnail: str | None = None, extra_fields: dict[str, Any] | None = None
+    kind: str,
+    thumbnail: str | None = None,
+    extra_fields: dict[str, Any] | None = None,
+    extra_links: dict[str, Any] | None = None,
+    extra_providers: dict[str, Any] | None = None,
 ) -> pystac.Collection:
     """Create a STAC Collection
 
@@ -59,9 +63,11 @@ def create_collection(
                 "[planet.com/contact-sales](https://www.planet.com/contact-sales/)"
             ),
             url="http://planet.com",
-            roles=["producer", "processor"],
+            roles=["producer", "processor", "licensor"],
         )
     ]
+    if extra_providers:
+        providers.extend([pystac.Provider(**provider) for provider in extra_providers])
     links = [
         pystac.Link(
             rel=pystac.RelType.LICENSE,
@@ -88,11 +94,21 @@ def create_collection(
             title="NICFI Program Resource Center",
         ),
     ]
+    if extra_links:
+        links.extend([pystac.Link(**link) for link in extra_links])
+
+    keywords = [
+        "Planet",
+        "NICFI",
+        "Satellite",
+        "Tropics",
+        "Imagery",
+    ]
 
     collection = pystac.Collection(
         id=f"planet-nicfi-{kind}",
-        title=f"Planet NICFI {kind}",
-        description="{{ description.md }}",
+        title=f"Planet-NICFI Basemaps ({kind.title()})",
+        description="{{ collection.description }}",
         license="proprietary",
         providers=providers,
         catalog_type=pystac.CatalogType.RELATIVE_PUBLISHED,
@@ -102,6 +118,7 @@ def create_collection(
                 [[datetime.datetime(2015, 12, 1, tzinfo=datetime.timezone.utc), None]]
             ),
         ),
+        keywords=keywords,
     )
     collection.add_links(links)
     descriptions = {
@@ -153,6 +170,9 @@ def create_collection(
     collection.summaries.add("gsd", [4.77])
     collection.summaries.add("eo:bands", eo_bands[kind])
     collection.summaries.add("planet-nicfi:cadence", ["biannual", "monthly"])
+    collection.summaries.add(
+        "planet-nicfi:percent_covered", pystac.RangeSummary(0, 100)
+    )
 
     if thumbnail is not None:
         # TODO: guess media type?
@@ -173,7 +193,10 @@ def create_collection(
 
 
 def create_item(
-    asset_href: str, mosaic_info_href: str, quad_info_href: str, transform_href=lambda x: x
+    asset_href: str,
+    mosaic_info_href: str,
+    quad_info_href: str,
+    transform_href=lambda x: x,
 ) -> pystac.Item:
     """
     Create a STAC item for a quad item from `mosaic`.
@@ -198,7 +221,9 @@ def create_item(
     return create_item_from_data(asset_href, image, mosaic, item_info)
 
 
-def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info: dict) -> pystac.Item:
+def create_item_from_data(
+    asset_href: str, image: bytes, mosaic: dict, item_info: dict
+) -> pystac.Item:
     start_datetime = dateutil.parser.parse(mosaic["first_acquired"])
     end_datetime = dateutil.parser.parse(mosaic["last_acquired"])
     timestamp = start_datetime + (end_datetime - start_datetime) / 2
@@ -215,7 +240,7 @@ def create_item_from_data(asset_href: str, image: bytes, mosaic: dict, item_info
         "end_datetime": mosaic["last_acquired"],
         "gsd": 4.77,
         "planet-nicfi:cadence": cadence,
-        # "planet-nicfi:kind": kind,
+        "planet-nicfi:percent_covered": item_info["percent_covered"],
     }
     item_id = f"{mosaic['id']}-{item_info['id']}"
 

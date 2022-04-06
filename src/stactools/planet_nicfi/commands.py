@@ -1,3 +1,4 @@
+import json
 import logging
 
 import click
@@ -32,7 +33,26 @@ def create_planetnicfi_command(cli):
         help="Key-value pairs to include in extra-fields",
         multiple=True,
     )
-    def create_collection_command(kind: str, destination: str, thumbnail: str, extra_field):
+    @click.option(
+        "--extra-link",
+        default=None,
+        help="Key-value pairs to include as extra links.",
+        multiple=True,
+    )
+    @click.option(
+        "--extra-provider",
+        default=None,
+        help="Key-value pairs to include as extra providers.",
+        multiple=True,
+    )
+    def create_collection_command(
+        kind: str,
+        destination: str,
+        thumbnail: str,
+        extra_field,
+        extra_link,
+        extra_provider,
+    ):
         """Creates a STAC Collection
 
         Args:
@@ -40,7 +60,15 @@ def create_planetnicfi_command(cli):
             destination (str): An HREF for the Collection JSON
         """
         extra_fields = dict(k.split("=") for k in extra_field)
-        collection = stac.create_collection(kind, thumbnail=thumbnail, extra_fields=extra_fields)
+        extra_links = [json.loads(s) for s in extra_link]
+        extra_providers = [json.loads(s) for s in extra_provider]
+        collection = stac.create_collection(
+            kind,
+            thumbnail=thumbnail,
+            extra_fields=extra_fields,
+            extra_links=extra_links,
+            extra_providers=extra_providers,
+        )
 
         collection.set_self_href(destination)
         collection.save_object()
