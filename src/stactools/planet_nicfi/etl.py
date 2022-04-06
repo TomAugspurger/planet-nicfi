@@ -1,5 +1,4 @@
 import json
-import os
 import azure.storage.blob
 import datetime
 import functools
