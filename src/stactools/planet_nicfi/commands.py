@@ -1,5 +1,6 @@
 import json
 import logging
+import pathlib
 
 import click
 
@@ -70,8 +71,8 @@ def create_planetnicfi_command(cli):
             extra_providers=extra_providers,
         )
 
-        collection.set_self_href(destination)
-        collection.save_object()
+        pathlib.Path(destination).write_text(json.dumps(collection.to_dict(), indent=2))
+        # collection.save_object()
         return None
 
     # @planetnicfi.command("create-item", short_help="Create a STAC item")
