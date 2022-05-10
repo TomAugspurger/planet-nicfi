@@ -171,9 +171,9 @@ def create_collection(
     collection.summaries.add("gsd", [4.77])
     collection.summaries.add("eo:bands", eo_bands[kind])
     collection.summaries.add("planet-nicfi:cadence", ["biannual", "monthly"])
-    collection.summaries.add(
-        "planet-nicfi:percent_covered", pystac.RangeSummary(0, 100)
-    )
+    # collection.summaries.add(
+    #     "planet-nicfi:percent_covered", pystac.RangeSummary(0, 100)
+    # )
 
     if thumbnail is not None:
         # TODO: guess media type?
@@ -245,7 +245,8 @@ def create_item_from_data(
         "end_datetime": mosaic["last_acquired"],
         "gsd": 4.77,
         "planet-nicfi:cadence": cadence,
-        "planet-nicfi:percent_covered": item_info["percent_covered"],
+        # Drop percent_covered for the API query optimization
+        # "planet-nicfi:percent_covered": item_info["percent_covered"],
     }
     item_id = f"{mosaic['id']}-{item_info['id']}"
 
