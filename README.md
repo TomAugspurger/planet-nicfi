@@ -50,3 +50,7 @@ stac planetnicfi create-collection analytic analytic-template.json \
    --extra-field "msft:container=nicfi" \
    --extra-field "msft:group_id=planet-nicfi"
 ```
+
+## ETL
+
+This repository also hosts the ETL code for extracting from the Planet API to Azure Blob Storage. See [etl](./src/azure/etl/README.md) for more.
