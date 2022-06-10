@@ -2,9 +2,11 @@ version: "3.9"
 services:
   test:
     image: mcr.microsoft.com/planetary-computer/python:2022.05.11.0
-    command: pytest /code/test_planet_nicfi_etl.py
+    # command: ./scripts/start pytest -vs
+    command: /bin/bash
+    working_dir: /home/jovyan/etl
     volumes:
-      - .:/code
+      - .:/home/jovyan/etl
     env_file:
       - .env
   cache-quads:
@@ -20,5 +22,13 @@ services:
     command: python /code/etl.py --start-datetime=2020-01-01 --end-datetime=2022-05-02 --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip?sv=2021-04-10&st=2022-06-07T16%3A46%3A37Z&se=2022-06-08T16%3A46%3A37Z&sr=b&sp=r&sig=HGo30M9CtM8a1Tatms3UXobD1OsieJjjR2z0ldsnulQ%3D"
     volumes:
       - .:/code
+    env_file:
+      - .env
+  console:
+    image: mcr.microsoft.com/planetary-computer/python:2022.05.11.0
+    command: /bin/bash
+    working_dir: /home/jovyan/etl
+    volumes:
+      - .:/home/jovyan/etl
     env_file:
       - .env

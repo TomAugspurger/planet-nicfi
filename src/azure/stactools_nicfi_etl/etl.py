@@ -1,8 +1,14 @@
 """
 ETL for planet-nicfi data from Planet -> Azure Blob Storage.
+
+The high-level pipeline is:
+
+
+AOI File -> List[Quad Info] -> Copy assets -> Create item
 """
 from __future__ import annotations
-from typing import Union, IO, AnyStr, TypedDict
+import collections
+from typing import Union, Any
 
 import argparse
 import datetime
@@ -25,176 +31,61 @@ import pystac
 import requests
 import shapely
 import dask_gateway
-import tqdm.auto
 
+from . import quads
+from .core import ETLRecord, etl_as_completed, bundle
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
 logger = logging.getLogger(__name__)
 
 
-class ETLProcessResult(TypedDict):
-    """
-    Represents the result of calling :meth:`ETLRecord.process`.
-
-    Parameters
-    ----------
-    name: str
-        The eventual name in the Azure Blob Storage container.
-    data: str, os.PathLike, typing.BinaryIO
-        The data provided to :meth:`azure.storage.blob.ContainerClient.upload_blob`.
-        This can be a path, file-like object, or the raw bytes to write.
-    content_settings: azure.storage.blob.ContentSettings
-        The content settings to set for the blob.
-    """
-    name: str
-    data: str | IO[AnyStr]
-    content_settings: azure.storage.blob.ContentSettings | None
+def build_session(planet_api_key: str) -> requests.Session:
+    auth = requests.auth.HTTPBasicAuth(planet_api_key, "")
+    session = requests.Session()
+    retries = requests.adapters.Retry(
+        total=5, backoff_factor=1, status_forcelist=[502, 503, 504]
+    )
+    session.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
+    session.auth = auth
+    return session
 
 
-@dataclasses.dataclass
-class ETLRecord:
-    """
-    Represents an item to be processed by pc-tasks.
+@functools.lru_cache
+def lookup_mosaic_info_by_name(mosaic_name: str, planet_api_key: str) -> dict[str, Any]:
+    session = build_session(planet_api_key)
+    r = session.get(API, params={"name__is": mosaic_name})
+    r.raise_for_status()
+    assert len(r.json()["mosaics"]) == 1, len(r.json()["mosaics"])
+    return r.json()["mosaics"][0]
 
-    An ETLRecord will correspond to one or more files from the source provider,
-    one or more blobs in Azure Blob Storage, and (ideally) *exactly one STAC item*.
 
-    Parameters
-    ----------
-    dataset_id: str
-        The identifier for the dataset. This might also be the collection ID.
-        This is used as the partition Key in Azure Storage Table. This and
-        `ETLRecord.item_id` uniquely identify a record
-    item_id: str
-    are_assets_copied: bool, default False
-    context: bool, default False
-    """
-
-    dataset_id: str
-    item_id: str
-    # TODO: harmonize are_assets_copied / state
-    # are_assets_copied: bool = False
-    state: str  # TODO: enum
-    run_id: str | None = None
-    context: dict = dataclasses.field(default_factory=dict)
-
-    @property
-    def collection_id(self):
-        """Assume 1:1 relationship between source and item"""
-        return self.dataset_id
-
-    @property
-    def entity(self) -> dict:
-        """
-        Returns a dictionary safe to write to an Azure Storage Table.
-        """
-        # TODO: extra fields
-        return {
-            "PartitionKey": self.dataset_id,
-            "RowKey": self.item_id,
-            "are_assets_copied": self.are_assets_copied,
-            "context": json.dumps(self.context),
-        }
-
-    @classmethod
-    def from_entity(cls, entity: dict) -> "ETLRecord":
-        """
-        Create an ETLRecord from an Azure Blob Storage query.
-        """
-        entity = dict(entity)
-        row_key = entity.pop("RowKey")
-        dataset_id = entity.pop("PartitionKey")
-        entity["context"] = json.loads(entity["context"])
-        return cls(**{"item_id": row_key, "dataset_id": dataset_id}, **entity)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return False
-
-    def process(self) -> list[ETLProcessResult]:
-        raise NotImplementedError
+@functools.lru_cache
+def lookup_mosaic_info_by_id(mosaic_id: str, planet_api_key: str) -> dict[str, Any]:
+    session = build_session(planet_api_key)
+    r = session.get(f"{API}/{mosaic_id}")
+    r.raise_for_status()
+    return r.json()
 
 
 @dataclasses.dataclass
 class PlanetNICFIRecord(ETLRecord):
-    planet_api_key : str | None = None
+    planet_api_key: str | None = None
 
     def __post_init__(self):
-        self._session_ = None
-        self.planet_api_key = self.planet_api_key or os.environ.get("ETL_PLANET_API_KEY")
+        self.planet_api_key = self.planet_api_key or os.environ.get(
+            "ETL_PLANET_API_KEY"
+        )
 
     @property
-    def mosaic_id(self) -> str: 
-        return self.item_id.split("_")[0]
+    def mosaic_id(self) -> str:
+        return self.row_key.split("_")[0]
 
     @property
     def quad_id(self) -> str:
-        return self.item_id.split("_")[1]
-
-    @property
-    def _session(self) -> requests.Session:
-        if self._session_ is None:
-            auth = requests.auth.HTTPBasicAuth(self.planet_api_key, "")
-            session = requests.Session()
-            retries = requests.adapters.Retry(
-                total=5, backoff_factor=1, status_forcelist=[502, 503, 504]
-            )
-            session.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
-            session.auth = auth
-            self._session_ = session
-        return self._session_
+        return self.row_key.split("_")[1]
 
     def get_mosaic(self) -> dict:
-        r = self._session.get(f"{API}/{self.mosaic_id}")
-        r.raise_for_status()
-        return r.json()
-
-    def get_quad(self) -> dict:
-        r = self._session.get(f"{API}/{self.mosaic_id}/quads/{self.quad_id}")
-        r.raise_for_status()
-        return r.json()
-
-    def process(self) -> list[ETLProcessResult]:
-        ...
-
-
-def etl_as_completed(futures_to_keys: dict[distributed.Future], credential=None):
-    """
-    Like dask.distributed.as_completed, but logs the result.
-
-    This could be made more generic and moved to an etl framework.
-    """
-    if credential is None:
-        credential = os.environ.get("ETL_ETL_TABLE_CREDENTIAL")
-    if isinstance(credential, str):
-        credential = azure.core.credentials.AzureSasCredential(credential)
-    table = azure.data.tables.TableClient(
-        "https://planet.table.core.windows.net",
-        "etl",
-        credential=credential,
-    )
-
-    # TODO: This might be a bottleneck. Batch into size 100
-    for future in distributed.as_completed(futures_to_keys):
-        keys = futures_to_keys[future]
-        entity = dict(keys)
-        if future.status == "finished":
-            result = future.result()
-            entity["state"] = "copied"
-            entity["context"] = json.dumps({"context": result})
-        elif future.status == "error":
-            entity["state"] = "error"
-            entity["context"] = json.dumps({"error": str(future.exception())})
-        else:
-            entity["state"] = "unknown"
-
-        try:
-            table.upsert_entity(entity)
-        except Exception:
-            logger.exception("Failed to update state")
-        yield future
+        return lookup_mosaic_info_by_id(self.mosaic_id, self.planet_api_key)
 
 
 def mosaics_for_datetime(timestamp: datetime.datetime) -> list[str]:
@@ -249,21 +140,6 @@ def mosaics_for_date_range(
     return sorted(set(out))
 
 
-@functools.lru_cache
-def mosaic_info(mosaic_name, planet_api_key):
-    """
-    Get the metadata for a Planet mosaic.
-
-    This fetches the STAC-like metadata for a given `mosaic_name` from the
-    Planet STAC API.
-    """
-    auth = requests.auth.HTTPBasicAuth(planet_api_key, "")
-    r = requests.get(API, auth=auth, params={"name__is": mosaic_name})
-    r.raise_for_status()
-    assert len(r.json()["mosaics"]) == 1, len(r.json()["mosaics"])
-    return r.json()["mosaics"][0]
-
-
 def name_blob(mosaic_info, item_info):
     """
     Generate the name for a data file in Azure Blob Storage.
@@ -307,7 +183,7 @@ def name_item_info(mosaic_info, item_info):
 
 def copy_item(
     mosaic: dict,
-    item_info: dict,
+    quad_info: dict,
     redownload=False,
     overwrite=True,
     asset_credential: str | None = None,
@@ -316,14 +192,14 @@ def copy_item(
     container_client = azure.storage.blob.ContainerClient(
         "https://planet.blob.core.windows.net", "nicfi", credential=asset_credential
     )
-    blob_name = name_blob(mosaic, item_info)
-    thumbnail_name = name_thumbnail(mosaic, item_info)
+    blob_name = name_blob(mosaic, quad_info)
+    thumbnail_name = name_thumbnail(mosaic, quad_info)
     mosaic_name = name_mosaic_info(mosaic)
-    quad_name = name_item_info(mosaic, item_info)
-    logger.debug("Copying item_info %s -> %s", item_info["id"], blob_name)
+    quad_name = name_item_info(mosaic, quad_info)
+    logger.debug("Copying item_info %s -> %s", quad_info["id"], blob_name)
     with container_client.get_blob_client(blob_name) as bc:
         if redownload or not bc.exists():
-            r_image = requests.get(item_info["_links"]["download"])
+            r_image = requests.get(quad_info["_links"]["download"])
             r_image.raise_for_status()
             image = r_image.content
             bc.upload_blob(
@@ -337,7 +213,7 @@ def copy_item(
 
     with container_client.get_blob_client(thumbnail_name) as bc:
         if redownload or not bc.exists():
-            r_thumbnail = requests.get(item_info["_links"]["thumbnail"])
+            r_thumbnail = requests.get(quad_info["_links"]["thumbnail"])
             r_thumbnail.raise_for_status()
             thumbnail = r_thumbnail.content
             bc.upload_blob(
@@ -361,7 +237,7 @@ def copy_item(
     with container_client.get_blob_client(quad_name) as bc:
         if redownload or not bc.exists():
             bc.upload_blob(
-                json.dumps(item_info).encode(),
+                json.dumps(quad_info).encode(),
                 content_settings=azure.storage.blob.ContentSettings(
                     str(pystac.MediaType.JSON)
                 ),
@@ -375,62 +251,71 @@ def copy_item(
     }
 
 
-def consume(session, request, key="items"):
-    items = request.json()[key]
-    while "_next" in request.json()["_links"]:
-        request = session.get(request.json()["_links"]["_next"])
-        request.raise_for_status()
-        items.extend(request.json()[key])
-    return items
+def do_one(record: PlanetNICFIRecord, quad_info, asset_credential) -> PlanetNICFIRecord:
+    mosaic_info = record.get_mosaic()
+    context = copy_item(mosaic_info, quad_info, asset_credential=asset_credential)
+    result = dataclasses.replace(record, state="finished", context=context)
+    return result
 
 
 def process_mosaic_item_info_pairs(
-    mosaic_item_info_pairs: list[tuple],
+    records: list[tuple[PlanetNICFIRecord, dict]],
     asset_credential: str | None = None,
-    etl_table_credential: str | None = None,
-) -> tuple[dict[str, str], list[str]]:
+    etl_table_credential: azure.core.credentials.AzureSasCredential | str | None = None,
+) -> dict[str, list[PlanetNICFIRecord]]:
+    if etl_table_credential is None:
+        etl_table_credential = os.environ.get("ETL_ETL_TABLE_CREDENTIAL")
+    if isinstance(etl_table_credential, str):
+        etl_table_credential = azure.core.credentials.AzureSasCredential(
+            etl_table_credential
+        )
+    table_client = azure.data.tables.TableClient(
+        "https://planet.table.core.windows.net",
+        "etl",
+        credential=etl_table_credential,
+    )
+
     gateway = dask_gateway.Gateway()
 
-    cluster = gateway.new_cluster(shutdown_on_close=False)
+    cluster = gateway.new_cluster()
+    import pathlib
+
+    if "__file__" in globals():
+        p = pathlib.Path(__file__).parent
+    else:
+        p = pathlib.Path("stactools_nicfi_etl")
+
+    plugin = bundle(p)
+    results = collections.defaultdict(list)
+
     with cluster:
         cluster.adapt(minimum=1, maximum=80)
         client: distributed.Client = cluster.get_client()
         with client:
-            client.register_worker_plugin(
-                distributed.UploadFile(os.path.abspath(__file__))
-            )
-
             print("Dashboard:", client.dashboard_link)
 
-            futures_to_keys = {
+            client.register_worker_plugin(plugin)
+
+            futures_to_records: dict[distributed.Future, PlanetNICFIRecord] = {
                 client.submit(
-                    copy_item, mosaic, item_info, asset_credential=asset_credential, retries=4
-                ): {
-                    "PartitionKey": "planet-nicfi",
-                    "RowKey": f"{mosaic['id']}_{item_info['id']}",
-                }
-                for mosaic, item_info in mosaic_item_info_pairs
+                    do_one,
+                    record,
+                    quad_info=quad_info,
+                    asset_credential=asset_credential,
+                    retries=4,
+                ): record
+                for record, quad_info in records
             }
 
-            items = []
-            errors = []
-            distributed.fire_and_forget(list(futures_to_keys))
-
-            # this is kinda slow. Only 2.5 items/s. Most likely
-            # time is spent updating the table.
-            for item in tqdm.auto.tqdm(
-                etl_as_completed(futures_to_keys, credential=etl_table_credential),
-                total=len(futures_to_keys),
+            distributed.fire_and_forget(list(futures_to_records))
+            for record in etl_as_completed(
+                futures_to_records, table_client=table_client, total=len(records)
             ):
-                try:
-                    items.append(item.result())
-                except Exception as e:
-                    logger.exception("failure")
-                    errors.append(str(e))
+                results[record.state].append(record)
 
     gateway.stop_cluster(cluster.name)
 
-    return items, errors
+    return dict(results)
 
 
 def load_quads(
@@ -443,8 +328,8 @@ def load_quads(
     )
     quads = list(quad_table.list_entities())
     quads = pd.DataFrame(quads)
-    quads["geometry"] = [
-        shapely.geometry.box(*json.loads(x)) for x in quads["bbox"].tolist()
+    quads["geometry"] = [  #  type: ignore
+        shapely.geometry.box(*json.loads(x)) for x in quads["bbox"].tolist()  # type: ignore
     ]
     quads = geopandas.GeoDataFrame(quads, crs="WGS84")
     return quads
@@ -456,9 +341,11 @@ def process_geometry(
     end_datetime: datetime.datetime,
     planet_api_key: str,
     asset_credential: str | None,
-    quads_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
+    quads_table_credential: str
+    | azure.core.credentials.AzureSasCredential
+    | None = None,
     etl_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
-) -> dict[str, str]:
+) -> dict[str, list[PlanetNICFIRecord]]:
     """
     Copy data from Planet to Azure Blob Storage for a specific space / time.
 
@@ -473,8 +360,6 @@ def process_geometry(
         A credential to upload to the planet/nicfi storage container. Probably
         a SAS token with write permissions.
     """
-    import quads
-
     logger.info("Loading quads")
     df = load_quads(quads_table_credential)
     # These don't match 100%. The Planet API returns some items that
@@ -486,57 +371,43 @@ def process_geometry(
 
     # TODO: Filter to state ne 'copied'
     item_quads = [
-        quads.Quad.deserialize(x._asdict())
-        for x in subquads.drop(columns="geometry").itertuples(index=False)
+        quads.Quad.from_entity(x._asdict())
+        for x in subquads.drop(columns=["geometry", "context"]).itertuples(index=False)
     ]
 
     # essentially geometry.covered_by, but might be slight gaps "on" the boundary.
     assert (geometry - subquads.unary_union).area < 0.0001
     # TODO: just fall back to querying.
 
-    auth = requests.auth.HTTPBasicAuth(planet_api_key, "")
-    session = requests.Session()
-    retries = requests.adapters.Retry(
-        total=5, backoff_factor=1, status_forcelist=[502, 503, 504]
-    )
-    session.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
-    session.auth = auth
-
     mosaic_names = mosaics_for_date_range(start_datetime, end_datetime)
-    mosaic_item_info_pairs = []
+    records: list[tuple[PlanetNICFIRecord, dict]] = []
 
     for name in mosaic_names:
-        mosaic = mosaic_info(name, planet_api_key)
+        mosaic_info = lookup_mosaic_info_by_name(name, planet_api_key)
         for q in item_quads:
-            mosaic_item_info_pairs.append((mosaic, q.to_api(mosaic, planet_api_key)))
+            quad_info = q.to_api(mosaic_info, planet_api_key)
+            records.append(
+                (
+                    PlanetNICFIRecord(
+                        partition_key="planet-nicfi",
+                        row_key="_".join([mosaic_info["id"], quad_info["id"]]),
+                        state=None,
+                        context={},
+                    ),
+                    quad_info,
+                )
+            )
 
-    mosaic_item_info_pairs = sorted(mosaic_item_info_pairs, key=lambda x: x[1]["id"])
-    items, errors = process_mosaic_item_info_pairs(
-        mosaic_item_info_pairs, asset_credential=asset_credential, etl_table_credential=etl_table_credential
+    results = process_mosaic_item_info_pairs(
+        records, asset_credential, etl_table_credential
     )
-
+    errors = []
+    errors.extend(results.get("cancelled", []))
+    errors.extend(results.get("error", []))
     if errors:
         raise RuntimeError(errors)
 
-    return items
-
-
-def redo(etl_table_credential, asset_credential):
-    table = azure.data.tables.TableClient(
-        "https://planet.table.core.windows.net",
-        "etl",
-        credential=etl_table_credential,
-    )
-    errors = table.query_entities("state ne 'copied'")
-    records = (PlanetNICFIRecord.from_entity(e) for e in errors)
-    mosaic_item_info_pairs = ((record.get_mosaic(), record.get_quad()) for record in records)
-    items, errors = process_mosaic_item_info_pairs(
-        mosaic_item_info_pairs, asset_credential=asset_credential, etl_table_credential=etl_table_credential
-    )
-    if errors:
-        raise RuntimeError(errors)
-    return items
-
+    return results
 
 
 def parse_args(args=None):
@@ -557,7 +428,9 @@ def parse_args(args=None):
 
     parser.add_argument("--start-datetime", type=dateutil.parser.parse)
     parser.add_argument("--end-datetime", type=dateutil.parser.parse)
-    parser.add_argument("--planet-api-key", default=os.environ.get("ETL_PLANET_API_KEY"))
+    parser.add_argument(
+        "--planet-api-key", default=os.environ.get("ETL_PLANET_API_KEY")
+    )
     parser.add_argument(
         "--asset-credential",
         default=os.environ.get("ETL_ASSET_CREDENTIAL"),

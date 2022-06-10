@@ -7,18 +7,22 @@ a little extra metadata).
 """
 from __future__ import annotations
 
+from typing import Any, Type, Mapping
+
 import argparse
-from multiprocessing.sharedctypes import Value
-import geopandas
 import os
+import dataclasses
+import json
+import functools
+
+import geopandas
 import azure.core.credentials
 import azure.data.tables
 import shapely.geometry
-import dataclasses
-import json
 import requests
-import functools
 import tlz
+
+from .core import consume, ETLRecord, ETLRecordT, parse_aoi
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
 
@@ -28,27 +32,23 @@ def parse_thumbnail(x):
 
 
 @dataclasses.dataclass
-class Quad:
-    row_key: str
+class Quad(ETLRecord):
     bbox: list[float]
-    # e.g. gmap/11/637/1054.png
-    thumbnail_id: str
-    partition_key: str = "quad"
-
-    def serialize(self):
-        out = dataclasses.asdict(self)
-        out["bbox"] = json.dumps(out["bbox"])
-        out["PartitionKey"] = out.pop("partition_key")
-        out["RowKey"] = out.pop("row_key")
-        return out
+    thumbnail_id: str  # e.g. gmap/11/637/1054.png
 
     @classmethod
-    def deserialize(cls, d: dict):
-        d = dict(d)
+    def from_entity(cls: Type[ETLRecordT], entity: Mapping[str, Any]) -> ETLRecordT:
+        d = dict(entity)
         d["bbox"] = json.loads(d["bbox"])
-        d["row_key"] = d.pop("RowKey")
-        d["partition_key"] = d.pop("PartitionKey")
-        return cls(**d)
+        d.setdefault("state", None)
+        # https://github.com/python/mypy/issues/12885
+        return super().from_entity(d)  # type: ignore
+
+    @property
+    def entity(self) -> dict[str, Any]:
+        d = super().entity
+        d["bbox"] = json.dumps(d["bbox"])
+        return d
 
     @classmethod
     def from_api(cls, item):
@@ -57,6 +57,8 @@ class Quad:
             row_key=item["id"],
             bbox=item["bbox"],
             thumbnail_id=parse_thumbnail(item),
+            state=None,
+            context={},
         )
 
     def to_api(self, mosaic, planet_api_key):
@@ -65,7 +67,7 @@ class Quad:
         self_link = f"{quad_base}?api_key={planet_api_key}"
         download_link = f"{quad_base}/full?api_key={planet_api_key}"
         items_link = f"{quad_base}/items?api_key={planet_api_key}"
-        thumbnails_link = f"https://tiles.planet.com/basemaps/v1/planet-tiles/{mosaic['name']}/{self.thumbnail_id}?api_key={planet_api_key}"
+        thumbnails_link = f"https://tiles.planet.com/basemaps/v1/planet-tiles/{mosaic['name']}/{self.thumbnail_id}?api_key={planet_api_key}"  # noqa: E501
         return {
             "_links": {
                 "_self": self_link,
@@ -76,18 +78,6 @@ class Quad:
             "bbox": self.bbox,
             "id": self.row_key,
         }
-
-
-def consume(session, request, key="items"):
-    items = request.json()[key]
-    i = 1
-    while "_next" in request.json()["_links"]:
-        print(f"Consuming page", i, end="\r")
-        request = session.get(request.json()["_links"]["_next"])
-        request.raise_for_status()
-        items.extend(request.json()[key])
-        i += 1
-    return items
 
 
 @functools.lru_cache
@@ -133,7 +123,7 @@ def cache_quads(bbox, name, planet_api_key, quad_table_credential):
     batches = tlz.partition_all(100, quads)
     results = []
     for batch in batches:
-        operations = [("upsert", record.serialize()) for record in batch]
+        operations = [("upsert", record.entity) for record in batch]
         b = quad_table.submit_transaction(operations)
         results.extend(b)
     print(f"Cached {len(quads)} quads", len(quads))
@@ -148,14 +138,16 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--geometry",
-        help="List of floats as left, bottom, right, top.",
+        help="Geometry as a geojson string.",
     )
     parser.add_argument(
         "--file",
-        help="List of floats as left, bottom, right, top.",
+        help="AOI(s) in a file that can be read by geopandas.",
     )
 
-    parser.add_argument("--planet-api-key", default=os.environ.get("ETL_PLANET_API_KEY"))
+    parser.add_argument(
+        "--planet-api-key", default=os.environ.get("ETL_PLANET_API_KEY")
+    )
     parser.add_argument(
         "--azure-table-credential",
         default=os.environ.get("ETL_QUADS_TABLE_CREDENTIAL"),
@@ -183,7 +175,9 @@ def main(args=None):
         df = geopandas.read_file(args.file)
         shapes = df.geometry.tolist()
 
+    shapes = parse_aoi(args.bbox, args.geometry, args.file)
     name = "planet_medres_normalized_analytic_2022-01_mosaic"
+    planet_api_key = args.planet_api_key
 
     if args.azure_table_credential:
         quad_table_credential = azure.core.credentials.AzureSasCredential(
@@ -193,11 +187,7 @@ def main(args=None):
         quad_table_credential = None
 
     for geom in shapes:
-        cache_quads(geom.bounds, name, args.planet_api_key, quad_table_credential)
-
-    # df = geopandas.read_file("...")
-    # for geom in df.geometry.tolist():
-    #     cache_quads(geom.bounds, name, args.planet_api_key, quad_table_credential)
+        cache_quads(geom.bounds, name, planet_api_key, quad_table_credential)
 
 
 if __name__ == "__main__":

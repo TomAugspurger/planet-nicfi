@@ -1,0 +1,30 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "stactools_nicfi_etl"
+authors = [{name = "Tom Augspurger", email = "taugspurger@microsoft.com"}]
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = ["License :: OSI Approved :: MIT License"]
+dynamic = ["version", "description"]
+
+dependencies = [
+    "azure-core",
+    "azure-storage-blob",
+    "azure-data-tables",
+    "dask",
+    "distributed",
+    "pandas",
+    "pystac",
+    "requests",
+    "shapely",
+    "dask-gateway",
+    "tqdm",
+    "geopandas",
+    "toolz",
+]
+
+[project.urls]
+Home = "https://github.com/TomAugspurger/planet-nicfi"
