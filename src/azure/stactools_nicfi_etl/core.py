@@ -8,7 +8,7 @@ import os
 import dataclasses
 import logging
 import traceback
-from typing import TypeVar, Type, Any
+from typing import TypeVar, Type, Any, Optional
 from collections.abc import Mapping
 import io
 import zipfile
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class ETLRecord:
     partition_key: str
     row_key: str
-    state: str | None
+    state: Optional[str]
     context: dict
 
     @property

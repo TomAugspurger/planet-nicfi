@@ -8,7 +8,7 @@ AOI File -> List[Quad Info] -> Copy assets -> Create item
 """
 from __future__ import annotations
 import collections
-from typing import Union, Any
+from typing import Union, Any, Optional
 
 import argparse
 import datetime
@@ -50,7 +50,7 @@ def build_session(planet_api_key: str) -> requests.Session:
     return session
 
 
-@functools.lru_cache
+# @functools.lru_cache
 def lookup_mosaic_info_by_name(mosaic_name: str, planet_api_key: str) -> dict[str, Any]:
     session = build_session(planet_api_key)
     r = session.get(API, params={"name__is": mosaic_name})
@@ -59,7 +59,7 @@ def lookup_mosaic_info_by_name(mosaic_name: str, planet_api_key: str) -> dict[st
     return r.json()["mosaics"][0]
 
 
-@functools.lru_cache
+# @functools.lru_cache
 def lookup_mosaic_info_by_id(mosaic_id: str, planet_api_key: str) -> dict[str, Any]:
     session = build_session(planet_api_key)
     r = session.get(f"{API}/{mosaic_id}")
@@ -67,14 +67,41 @@ def lookup_mosaic_info_by_id(mosaic_id: str, planet_api_key: str) -> dict[str, A
     return r.json()
 
 
+# XXX: I don't understand the behavior of dataclasses here.
+# asdict is returning just the subclasses stuff. Or nothing at all?
+# only when run under __main__.
 @dataclasses.dataclass
 class PlanetNICFIRecord(ETLRecord):
-    planet_api_key: str | None = None
+    partition_key: str
+    row_key: str
+    state: Optional[str]
+    context: dict
+    planet_api_key: Optional[str] = None
+
+    @property
+    def entity(self) -> dict[str, Any]:
+        # d = dataclasses.asdict(self)
+        d = {
+            "PartitionKey": self.partition_key,
+            "RowKey": self.row_key,
+            "state": self.state,
+            "context": json.dumps(self.context)
+        }
+        return d
 
     def __post_init__(self):
         self.planet_api_key = self.planet_api_key or os.environ.get(
             "ETL_PLANET_API_KEY"
         )
+
+    @classmethod
+    def from_entity(cls, entity):
+        d = dict(entity)
+        d.setdefault("context", "{}")
+        d["partition_key"] = d.pop("PartitionKey")
+        d["row_key"] = d.pop("RowKey")
+        d["context"] = json.loads(d["context"])
+        return cls(**d)
 
     @property
     def mosaic_id(self) -> str:
@@ -294,6 +321,7 @@ def process_mosaic_item_info_pairs(
         with client:
             print("Dashboard:", client.dashboard_link)
 
+            client.wait_for_workers(1)
             client.register_worker_plugin(plugin)
 
             futures_to_records: dict[distributed.Future, PlanetNICFIRecord] = {
@@ -312,6 +340,7 @@ def process_mosaic_item_info_pairs(
                 futures_to_records, table_client=table_client, total=len(records)
             ):
                 results[record.state].append(record)
+
 
     gateway.stop_cluster(cluster.name)
 
@@ -461,7 +490,7 @@ def main(args=None):
         df = geopandas.read_file(args.file)
         shape = df.geometry.unary_union
 
-    process_geometry(
+    results = process_geometry(
         shape,
         args.start_datetime,
         args.end_datetime,
@@ -470,7 +499,10 @@ def main(args=None):
         quads_table_credential=args.quads_table_credential,
         etl_table_credential=args.etl_table_credential,
     )
+    logger.info("Processed %d items", len(results.get("finished", [])))
+
 
 
 if __name__ == "__main__":
     main()
+
