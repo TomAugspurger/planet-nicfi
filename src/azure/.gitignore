@@ -1,3 +1,4 @@
 .env
+*.zip
 dask-worker-space
 package.zip

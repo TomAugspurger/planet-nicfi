@@ -32,8 +32,8 @@ import requests
 import shapely
 import dask_gateway
 
-from . import quads
-from .core import ETLRecord, etl_as_completed, bundle
+from stactools_nicfi_etl import quads
+from stactools_nicfi_etl.core import ETLRecord, etl_as_completed, bundle
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
 logger = logging.getLogger(__name__)
