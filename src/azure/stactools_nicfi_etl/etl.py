@@ -50,21 +50,35 @@ def build_session(planet_api_key: str) -> requests.Session:
     return session
 
 
-# @functools.lru_cache
+_MOSAIC_INFO_NAME_CACHE = {}
+_MOSAIC_INFO_ID_CACHE = {}
+
+
 def lookup_mosaic_info_by_name(mosaic_name: str, planet_api_key: str) -> dict[str, Any]:
+    result = _MOSAIC_INFO_NAME_CACHE.get(mosaic_name, {})
+    if result:
+        return result
+
     session = build_session(planet_api_key)
     r = session.get(API, params={"name__is": mosaic_name})
     r.raise_for_status()
     assert len(r.json()["mosaics"]) == 1, len(r.json()["mosaics"])
-    return r.json()["mosaics"][0]
+    result = r.json()["mosaics"][0]
+    _MOSAIC_INFO_NAME_CACHE.setdefault(mosaic_name, result)
+    return result
 
 
-# @functools.lru_cache
 def lookup_mosaic_info_by_id(mosaic_id: str, planet_api_key: str) -> dict[str, Any]:
+    result = _MOSAIC_INFO_ID_CACHE.get(mosaic_id, {})
+    if result:
+        return result
+
     session = build_session(planet_api_key)
     r = session.get(f"{API}/{mosaic_id}")
     r.raise_for_status()
-    return r.json()
+    result = r.json()
+    _MOSAIC_INFO_ID_CACHE.setdefault(mosaic_id, result)
+    return result
 
 
 # XXX: I don't understand the behavior of dataclasses here.
@@ -398,7 +412,7 @@ def process_geometry(
         warnings.filterwarnings("ignore", "Geometry is in a geographic")
         subquads = df[df.buffer(0.000001).intersects(geometry)]
 
-    # TODO: Filter to state ne 'copied'
+    # TODO: Filter to state ne 'copied', but also have to intersect...
     item_quads = [
         quads.Quad.from_entity(x._asdict())
         for x in subquads.drop(columns=["geometry", "context"]).itertuples(index=False)
@@ -427,6 +441,7 @@ def process_geometry(
                 )
             )
 
+    logger.info("Processing %d records", len(records))
     results = process_mosaic_item_info_pairs(
         records, asset_credential, etl_table_credential
     )
@@ -501,6 +516,19 @@ def main(args=None):
     )
     logger.info("Processed %d items", len(results.get("finished", [])))
 
+
+def redo(
+    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
+    start_datetime: datetime.datetime,
+    end_datetime: datetime.datetime,
+    planet_api_key: str,
+    asset_credential: str | None,
+    quads_table_credential: str
+    | azure.core.credentials.AzureSasCredential
+    | None = None,
+    etl_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
+):
+    ...
 
 
 if __name__ == "__main__":
