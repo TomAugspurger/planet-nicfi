@@ -11,7 +11,7 @@ services:
       - .env
   cache-quads:
     image: mcr.microsoft.com/planetary-computer/python:2022.05.11.0
-    command: python /code/quads.py --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip?sv=2021-04-10&st=2022-06-07T16%3A46%3A37Z&se=2022-06-08T16%3A46%3A37Z&sr=b&sp=r&sig=HGo30M9CtM8a1Tatms3UXobD1OsieJjjR2z0ldsnulQ%3D"
+    command: python /code/quads.py --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip"
     volumes:
       - .:/code
     env_file:
@@ -19,7 +19,7 @@ services:
   extract:
     image: mcr.microsoft.com/planetary-computer/python:2022.05.11.0
     # command: python /code/main.py --start-datetime=2020-01-01 --end-datetime=2022-04-02 --file=/code/aois/planet_areas_brazil_amazonia.zip
-    command: python /code/etl.py --start-datetime=2020-01-01 --end-datetime=2022-05-02 --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip?sv=2021-04-10&st=2022-06-07T16%3A46%3A37Z&se=2022-06-08T16%3A46%3A37Z&sr=b&sp=r&sig=HGo30M9CtM8a1Tatms3UXobD1OsieJjjR2z0ldsnulQ%3D"
+    command: python /code/etl.py --start-datetime=2020-01-01 --end-datetime=2022-05-02 --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip"
     volumes:
       - .:/code
     env_file:
