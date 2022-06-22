@@ -19,7 +19,7 @@ services:
   extract:
     image: mcr.microsoft.com/planetary-computer/python:2022.05.11.0
     # command: python /code/main.py --start-datetime=2020-01-01 --end-datetime=2022-04-02 --file=/code/aois/planet_areas_brazil_amazonia.zip
-    command: python /code/etl.py --start-datetime=2020-01-01 --end-datetime=2022-05-02 --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip"
+    command: python stactools_nicfi_etl/etl.py --start-datetime=2020-01-01 --end-datetime=2022-05-02 --file="https://planet.blob.core.windows.net/nicfi-etl-data/aois/planet_areas_brazil_amazonia.zip"
     volumes:
       - .:/code
     env_file:

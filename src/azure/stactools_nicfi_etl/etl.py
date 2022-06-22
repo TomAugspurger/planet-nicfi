@@ -7,14 +7,14 @@ The high-level pipeline is:
 AOI File -> List[Quad Info] -> Copy assets -> Create item
 """
 from __future__ import annotations
-import collections
+import traceback
 from typing import Union, Any, Optional
 
 import argparse
 import datetime
 import dataclasses
+import dask
 import dateutil
-import functools
 import json
 import logging
 import os
@@ -31,9 +31,11 @@ import pystac
 import requests
 import shapely
 import dask_gateway
+import tlz
 
 from stactools_nicfi_etl import quads
-from stactools_nicfi_etl.core import ETLRecord, etl_as_completed, bundle
+from stactools_nicfi_etl.core import ETLRecord, bundle
+import tqdm
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
 logger = logging.getLogger(__name__)
@@ -90,6 +92,7 @@ class PlanetNICFIRecord(ETLRecord):
     row_key: str
     state: Optional[str]
     context: dict
+    run_id: str
     planet_api_key: Optional[str] = None
 
     @property
@@ -99,7 +102,8 @@ class PlanetNICFIRecord(ETLRecord):
             "PartitionKey": self.partition_key,
             "RowKey": self.row_key,
             "state": self.state,
-            "context": json.dumps(self.context)
+            "context": json.dumps(self.context),
+            "run_id": self.run_id,
         }
         return d
 
@@ -292,30 +296,52 @@ def copy_item(
     }
 
 
-def do_one(record: PlanetNICFIRecord, quad_info, asset_credential) -> PlanetNICFIRecord:
+def do_one(
+    record: PlanetNICFIRecord,
+    asset_credential: str | None,
+    planet_api_key: str | None = None,
+    quads_table_credential: azure.core.credentials.AzureSasCredential
+    | str
+    | None = None,
+    etl_table_credential: azure.core.credentials.AzureSasCredential | str | None = None,
+) -> PlanetNICFIRecord:
     mosaic_info = record.get_mosaic()
-    context = copy_item(mosaic_info, quad_info, asset_credential=asset_credential)
-    result = dataclasses.replace(record, state="finished", context=context)
+    quad_table_client = get_table_client("quads", quads_table_credential)
+    etl_table_client = get_table_client("etl", etl_table_credential)
+    try:
+        entity = quad_table_client.get_entity("quad", record.quad_id)
+        quad_info = quads.Quad.from_entity(entity).to_api(mosaic_info, planet_api_key)
+        context = copy_item(mosaic_info, quad_info, asset_credential=asset_credential)
+        result = dataclasses.replace(record, state="finished", context=context)
+    except Exception as e:
+        context = {"traceback": traceback.format_traceback(e)}
+        result = dataclasses.replace(record, state="error", context=context)
+
+    etl_table_client.upsert_entity(result.entity)
     return result
 
 
-def process_mosaic_item_info_pairs(
-    records: list[tuple[PlanetNICFIRecord, dict]],
-    asset_credential: str | None = None,
-    etl_table_credential: azure.core.credentials.AzureSasCredential | str | None = None,
-) -> dict[str, list[PlanetNICFIRecord]]:
-    if etl_table_credential is None:
-        etl_table_credential = os.environ.get("ETL_ETL_TABLE_CREDENTIAL")
-    if isinstance(etl_table_credential, str):
-        etl_table_credential = azure.core.credentials.AzureSasCredential(
-            etl_table_credential
-        )
-    table_client = azure.data.tables.TableClient(
+def get_table_client(
+    table_name, credential: str | azure.core.credentials.AzureSasCredential
+):
+    if isinstance(credential, str):
+        credential = azure.core.credentials.AzureSasCredential(credential)
+    return azure.data.tables.TableClient(
         "https://planet.table.core.windows.net",
-        "etl",
-        credential=etl_table_credential,
+        table_name,
+        credential=credential,
     )
 
+
+def process_mosaic_item_info_pairs(
+    records: list[PlanetNICFIRecord],
+    asset_credential: str | None = None,
+    planet_api_key: str | None = None,
+    etl_table_credential: azure.core.credentials.AzureSasCredential | str | None = None,
+    quads_table_credential: azure.core.credentials.AzureSasCredential
+    | str
+    | None = None,
+) -> dict[str, list[PlanetNICFIRecord]]:
     gateway = dask_gateway.Gateway()
 
     cluster = gateway.new_cluster()
@@ -327,7 +353,9 @@ def process_mosaic_item_info_pairs(
         p = pathlib.Path("stactools_nicfi_etl")
 
     plugin = bundle(p)
-    results = collections.defaultdict(list)
+
+    errors = []
+    success = []
 
     with cluster:
         cluster.adapt(minimum=1, maximum=80)
@@ -335,53 +363,74 @@ def process_mosaic_item_info_pairs(
         with client:
             print("Dashboard:", client.dashboard_link)
 
-            client.wait_for_workers(1)
+            # client.wait_for_workers(1)
             client.register_worker_plugin(plugin)
+            batches = tlz.partition_all(100, records)
+            futures_to_records: dict[distributed.Future, PlanetNICFIRecord] = {}
 
-            futures_to_records: dict[distributed.Future, PlanetNICFIRecord] = {
-                client.submit(
-                    do_one,
-                    record,
-                    quad_info=quad_info,
-                    asset_credential=asset_credential,
-                    retries=4,
-                ): record
-                for record, quad_info in records
-            }
+            for batch in batches:
+                for record in batch:
+                    future = client.submit(
+                        do_one,
+                        record,
+                        asset_credential=asset_credential,
+                        planet_api_key=planet_api_key,
+                        quads_table_credential=quads_table_credential,
+                        etl_table_credential=etl_table_credential,
+                        retries=4,
+                    )
+                    futures_to_records[future] = record
 
             distributed.fire_and_forget(list(futures_to_records))
-            for record in etl_as_completed(
-                futures_to_records, table_client=table_client, total=len(records)
-            ):
-                results[record.state].append(record)
-
-
+            for future in distributed.as_completed(futures_to_records):
+                assert future.status in {"cancelled", "error", "finished"}
+                record = futures_to_records[future]
+                if future.status == "finished":
+                    success.append(record)
+                else:
+                    logger.warning("Error", record)
+                    errors.append(record)
     gateway.stop_cluster(cluster.name)
 
-    return dict(results)
+    return success, errors
 
 
 def load_quads(
+    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
     table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
-) -> geopandas.GeoDataFrame:
+) -> list[quads.Quad]:
     if isinstance(table_credential, str):
         table_credential = azure.core.credentials.AzureSasCredential(table_credential)
     quad_table = azure.data.tables.TableClient(
         "https://planet.table.core.windows.net", "quads", credential=table_credential
     )
-    quads = list(quad_table.list_entities())
-    quads = pd.DataFrame(quads)
-    quads["geometry"] = [  #  type: ignore
-        shapely.geometry.box(*json.loads(x)) for x in quads["bbox"].tolist()  # type: ignore
+    df_quads = list(quad_table.list_entities())
+    df_quads = pd.DataFrame(df_quads)
+    df_quads["geometry"] = [  #  type: ignore
+        shapely.geometry.box(*json.loads(x)) for x in df_quads["bbox"].tolist()  # type: ignore
     ]
-    quads = geopandas.GeoDataFrame(quads, crs="WGS84")
-    return quads
+    df = geopandas.GeoDataFrame(df_quads, crs="WGS84")
+
+    # These don't match 100%. The Planet API returns some items that
+    # don't actually intersect with the bounding box. So we add a tiny buffer
+    # TODO: filter warning
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Geometry is in a geographic")
+        subquads = df[df.buffer(0.000001).intersects(geometry)]
+
+    assert (geometry - subquads.unary_union).area < 0.0001
+    # TODO: Filter to state ne 'copied', but also have to intersect...
+    # essentially geometry.covered_by, but might be slight gaps "on" the boundary.
+    item_quads = [
+        quads.Quad.from_entity(x._asdict())
+        for x in subquads.drop(columns=["geometry", "context"]).itertuples(index=False)
+    ]
+
+    return item_quads
 
 
-def process_geometry(
-    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
-    start_datetime: datetime.datetime,
-    end_datetime: datetime.datetime,
+def process_initialized(
+    run_id: str,
     planet_api_key: str,
     asset_credential: str | None,
     quads_table_credential: str
@@ -403,55 +452,61 @@ def process_geometry(
         A credential to upload to the planet/nicfi storage container. Probably
         a SAS token with write permissions.
     """
-    logger.info("Loading quads")
-    df = load_quads(quads_table_credential)
-    # These don't match 100%. The Planet API returns some items that
-    # don't actually intersect with the bounding box. So we add a tiny buffer
-    # TODO: filter warning
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "Geometry is in a geographic")
-        subquads = df[df.buffer(0.000001).intersects(geometry)]
+    table_client = get_table_client("etl", etl_table_credential)
+    records = (
+        PlanetNICFIRecord.from_entity(x)
+        for x in table_client.query_entities(f"state eq 'initialized' and run_id eq '{run_id}'")
+        # TODO: filter on run ID too
+    )
+    success, errors = process_mosaic_item_info_pairs(
+        records,
+        asset_credential=asset_credential,
+        planet_api_key=planet_api_key,
+        etl_table_credential=etl_table_credential,
+        quads_table_credential=quads_table_credential,
+    )
+    if errors:
+        raise RuntimeError(errors)
 
-    # TODO: Filter to state ne 'copied', but also have to intersect...
-    item_quads = [
-        quads.Quad.from_entity(x._asdict())
-        for x in subquads.drop(columns=["geometry", "context"]).itertuples(index=False)
-    ]
+    return success
 
-    # essentially geometry.covered_by, but might be slight gaps "on" the boundary.
-    assert (geometry - subquads.unary_union).area < 0.0001
-    # TODO: just fall back to querying.
 
+def initialize(
+    run_id: str,
+    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
+    start_datetime: datetime.datetime,
+    end_datetime: datetime.datetime,
+    planet_api_key: str,
+    quads_table_credential: str
+    | azure.core.credentials.AzureSasCredential
+    | None = None,
+    etl_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
+):
+    """Initialize the per-item records"""
+    table_client = get_table_client("etl", etl_table_credential)
+    item_quads = load_quads(geometry, quads_table_credential)
     mosaic_names = mosaics_for_date_range(start_datetime, end_datetime)
-    records: list[tuple[PlanetNICFIRecord, dict]] = []
+    records = []
 
     for name in mosaic_names:
         mosaic_info = lookup_mosaic_info_by_name(name, planet_api_key)
         for q in item_quads:
             quad_info = q.to_api(mosaic_info, planet_api_key)
             records.append(
-                (
-                    PlanetNICFIRecord(
-                        partition_key="planet-nicfi",
-                        row_key="_".join([mosaic_info["id"], quad_info["id"]]),
-                        state=None,
-                        context={},
-                    ),
-                    quad_info,
+                PlanetNICFIRecord(
+                    partition_key="planet-nicfi",
+                    row_key="_".join([mosaic_info["id"], quad_info["id"]]),
+                    state="initialized",
+                    run_id=run_id,
+                    context={},
                 )
             )
 
-    logger.info("Processing %d records", len(records))
-    results = process_mosaic_item_info_pairs(
-        records, asset_credential, etl_table_credential
-    )
-    errors = []
-    errors.extend(results.get("cancelled", []))
-    errors.extend(results.get("error", []))
-    if errors:
-        raise RuntimeError(errors)
-
-    return results
+    batches = tlz.partition_all(100, records)
+    total = len(records) // 100
+    for batch in tqdm.tqdm(batches, total=total):
+        operations = [("upsert", record.entity) for record in batch]
+        table_client.submit_transaction(operations)
 
 
 def parse_args(args=None):
@@ -487,8 +542,19 @@ def parse_args(args=None):
         "--etl-table-credential",
         default=os.environ.get("ETL_ETL_TABLE_CREDENTIAL"),
     )
+    parser.add_argument("--run-id", default=None)
 
     return parser.parse_args(args)
+
+
+def get_run_id(
+    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
+    start_datetime: datetime.datetime,
+    end_datetime: datetime.datetime,
+):
+    geometry_token = dask.base.tokenize(shapely.geometry.mapping(geometry))
+    run_id = f"{geometry_token}_{start_datetime.isoformat()}_{end_datetime.isoformat()}"
+    return run_id
 
 
 def main(args=None):
@@ -498,39 +564,40 @@ def main(args=None):
         raise ValueError("Specify one of bbox, geometry, file")
 
     if args.bbox:
-        shape = shapely.geometry.box(*args.bbox)
+        geometry = shapely.geometry.box(*args.bbox)
     elif args.geometry:
-        shape = shapely.geometry.shape(args.geometry)
+        geometry = shapely.geometry.shape(args.geometry)
     else:
-        df = geopandas.read_file(args.file)
-        shape = df.geometry.unary_union
+        file = args.file
+        if file.startswith("https://planet.blob.core.windows.net/nicfi-etl-data"):
+            file = f"{file}?{os.environ['ETL_PLANET_ETL_DATA_CREDENTIAL'].lstrip('?')}"
 
-    results = process_geometry(
-        shape,
-        args.start_datetime,
-        args.end_datetime,
+        df = geopandas.read_file(file)
+        geometry = df.geometry.unary_union
+
+    run_id = args.run_id
+    if run_id is None:
+        run_id = get_run_id(geometry, args.start_datetime, args.end_datetime)
+
+    initialize(
+        run_id,
+        geometry,
+        start_datetime=args.start_datetime,
+        end_datetime=args.end_datetime,
+        planet_api_key=args.planet_api_key,
+        quads_table_credential=args.quads_table_credential,
+        etl_table_credential=args.etl_table_credential,
+    )
+
+    results = process_initialized(
+        run_id=run_id,
         planet_api_key=args.planet_api_key,
         asset_credential=args.asset_credential,
         quads_table_credential=args.quads_table_credential,
         etl_table_credential=args.etl_table_credential,
     )
-    logger.info("Processed %d items", len(results.get("finished", [])))
-
-
-def redo(
-    geometry: Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon],
-    start_datetime: datetime.datetime,
-    end_datetime: datetime.datetime,
-    planet_api_key: str,
-    asset_credential: str | None,
-    quads_table_credential: str
-    | azure.core.credentials.AzureSasCredential
-    | None = None,
-    etl_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
-):
-    ...
+    logger.info("Processed %d items", len(results))
 
 
 if __name__ == "__main__":
     main()
-

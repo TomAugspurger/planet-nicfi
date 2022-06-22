@@ -160,7 +160,7 @@ class InitPlugin(WorkerPlugin):
         response = await worker.upload_file(
             comm=None, filename=self.zip_module_path, data=self._data, load=False
         )
-        logger.warning("Uplaoded file")
+        logger.warning("Uploaded file")
         sys.path.append(self.zip_module_path)
         # return super().setup(worker)
         assert len(self._data) == response["nbytes"]
