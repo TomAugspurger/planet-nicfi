@@ -34,7 +34,7 @@ import dask_gateway
 import tlz
 
 from stactools_nicfi_etl import quads
-from stactools_nicfi_etl.core import ETLRecord, bundle
+from stactools_nicfi_etl.core import ETLRecord, bundle, compute_requester_id
 import tqdm
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
@@ -298,6 +298,7 @@ def copy_item(
 
 def do_one(
     record: PlanetNICFIRecord,
+    requester_id: str,
     asset_credential: str | None,
     planet_api_key: str | None = None,
     quads_table_credential: azure.core.credentials.AzureSasCredential
@@ -309,7 +310,7 @@ def do_one(
     quad_table_client = get_table_client("quads", quads_table_credential)
     etl_table_client = get_table_client("etl", etl_table_credential)
     try:
-        entity = quad_table_client.get_entity("quad", record.quad_id)
+        entity = quad_table_client.get_entity(requester_id, record.quad_id)
         quad_info = quads.Quad.from_entity(entity).to_api(mosaic_info, planet_api_key)
         context = copy_item(mosaic_info, quad_info, asset_credential=asset_credential)
         result = dataclasses.replace(record, state="finished", context=context)
@@ -335,6 +336,7 @@ def get_table_client(
 
 def process_mosaic_item_info_pairs(
     records: list[PlanetNICFIRecord],
+    requester_id: str,
     asset_credential: str | None = None,
     planet_api_key: str | None = None,
     etl_table_credential: azure.core.credentials.AzureSasCredential | str | None = None,
@@ -373,6 +375,7 @@ def process_mosaic_item_info_pairs(
                     future = client.submit(
                         do_one,
                         record,
+                        requester_id,
                         asset_credential=asset_credential,
                         planet_api_key=planet_api_key,
                         quads_table_credential=quads_table_credential,
@@ -431,6 +434,7 @@ def load_quads(
 
 def process_initialized(
     run_id: str,
+    requester_id: str,
     planet_api_key: str,
     asset_credential: str | None,
     quads_table_credential: str
@@ -460,6 +464,7 @@ def process_initialized(
     )
     success, errors = process_mosaic_item_info_pairs(
         records,
+        requester_id,
         asset_credential=asset_credential,
         planet_api_key=planet_api_key,
         etl_table_credential=etl_table_credential,
@@ -575,6 +580,8 @@ def main(args=None):
         df = geopandas.read_file(file)
         geometry = df.geometry.unary_union
 
+    requester_id = compute_requester_id(geometry)
+
     run_id = args.run_id
     if run_id is None:
         run_id = get_run_id(geometry, args.start_datetime, args.end_datetime)
@@ -591,6 +598,7 @@ def main(args=None):
 
     results = process_initialized(
         run_id=run_id,
+        requester_id=requester_id,
         planet_api_key=args.planet_api_key,
         asset_credential=args.asset_credential,
         quads_table_credential=args.quads_table_credential,

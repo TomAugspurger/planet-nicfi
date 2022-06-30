@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Type, Mapping
 
 import argparse
+import hashlib
 import os
 import dataclasses
 import json
@@ -22,7 +23,7 @@ import shapely.geometry
 import requests
 import tlz
 
-from .core import consume, ETLRecord, ETLRecordT, parse_aoi
+from .core import consume, ETLRecord, ETLRecordT, parse_aoi, compute_requester_id
 
 API = "https://api.planet.com/basemaps/v1/mosaics"
 
@@ -34,7 +35,7 @@ def parse_thumbnail(x):
 @dataclasses.dataclass
 class Quad(ETLRecord):
     bbox: list[float]
-    thumbnail_id: str  # e.g. gmap/11/637/1054.png
+    thumbnail_id: str  # e.g. gmap/11/637/1054.png.
 
     @classmethod
     def from_entity(cls: Type[ETLRecordT], entity: Mapping[str, Any]) -> ETLRecordT:
@@ -51,9 +52,9 @@ class Quad(ETLRecord):
         return d
 
     @classmethod
-    def from_api(cls, item):
+    def from_api(cls, item, requester_id):
         return cls(
-            partition_key="quad",
+            partition_key=requester_id,
             row_key=item["id"],
             bbox=item["bbox"],
             thumbnail_id=parse_thumbnail(item),
@@ -95,7 +96,7 @@ def mosaic_info(mosaic_name, planet_api_key):
     return r.json()["mosaics"][0]
 
 
-def cache_quads(bbox, name, planet_api_key, quad_table_credential):
+def cache_quads(bbox, name, planet_api_key, quad_table_credential, requester_id: str):
     session = requests.Session()
     retries = requests.adapters.Retry(
         total=5, backoff_factor=1, status_forcelist=[502, 503, 504]
@@ -117,7 +118,7 @@ def cache_quads(bbox, name, planet_api_key, quad_table_credential):
     )
     r_quads.raise_for_status()
     items = consume(session, r_quads)
-    quads = [Quad.from_api(item) for item in items]
+    quads = [Quad.from_api(item, requester_id=requester_id) for item in items]
 
     print("Caching quads")
     batches = tlz.partition_all(100, quads)
@@ -175,6 +176,8 @@ def main(args=None):
         df = geopandas.read_file(args.file)
         shapes = df.geometry.tolist()
 
+    requester_id = compute_requester_id(shapely.ops.unary_union(shapes))
+
     shapes = parse_aoi(args.bbox, args.geometry, args.file)
     name = "planet_medres_normalized_analytic_2022-01_mosaic"
     planet_api_key = args.planet_api_key
@@ -187,7 +190,7 @@ def main(args=None):
         quad_table_credential = None
 
     for geom in shapes:
-        cache_quads(geom.bounds, name, planet_api_key, quad_table_credential)
+        cache_quads(geom.bounds, name, planet_api_key, quad_table_credential, requester_id=requester_id)
 
 
 if __name__ == "__main__":

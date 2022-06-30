@@ -2,6 +2,7 @@
 Core ETL functionality to refactor elsewhere.
 """
 from __future__ import annotations
+import hashlib
 import json
 
 import os
@@ -19,6 +20,7 @@ import tlz
 import azure.data.tables
 import dask.distributed
 import shapely.geometry
+import shapely.ops
 import geopandas
 from dask.distributed import WorkerPlugin
 import tqdm
@@ -165,3 +167,8 @@ class InitPlugin(WorkerPlugin):
         # return super().setup(worker)
         assert len(self._data) == response["nbytes"]
         return response
+
+
+def compute_requester_id(geom: shapely.geometry.base.BaseGeometry) -> str:
+    key = hashlib.md5(json.dumps(shapely.geometry.mapping(geom)).encode()).hexdigest()
+    return key
