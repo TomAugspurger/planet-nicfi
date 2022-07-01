@@ -62,7 +62,7 @@ def lookup_mosaic_info_by_name(mosaic_name: str, planet_api_key: str) -> dict[st
         return result
 
     session = build_session(planet_api_key)
-    r = session.get(API, params={"name__is": mosaic_name})
+    r = session.get(API, params={"name__is": mosaic_name}, timeout=30)
     r.raise_for_status()
     assert len(r.json()["mosaics"]) == 1, len(r.json()["mosaics"])
     result = r.json()["mosaics"][0]
@@ -76,7 +76,7 @@ def lookup_mosaic_info_by_id(mosaic_id: str, planet_api_key: str) -> dict[str, A
         return result
 
     session = build_session(planet_api_key)
-    r = session.get(f"{API}/{mosaic_id}")
+    r = session.get(f"{API}/{mosaic_id}", timeout=30)
     r.raise_for_status()
     result = r.json()
     _MOSAIC_INFO_ID_CACHE.setdefault(mosaic_id, result)
@@ -244,7 +244,7 @@ def copy_item(
     logger.debug("Copying item_info %s -> %s", quad_info["id"], blob_name)
     with container_client.get_blob_client(blob_name) as bc:
         if redownload or not bc.exists():
-            r_image = requests.get(quad_info["_links"]["download"])
+            r_image = requests.get(quad_info["_links"]["download"], timeout=60)
             r_image.raise_for_status()
             image = r_image.content
             bc.upload_blob(
@@ -258,7 +258,7 @@ def copy_item(
 
     with container_client.get_blob_client(thumbnail_name) as bc:
         if redownload or not bc.exists():
-            r_thumbnail = requests.get(quad_info["_links"]["thumbnail"])
+            r_thumbnail = requests.get(quad_info["_links"]["thumbnail"], timeout=60)
             r_thumbnail.raise_for_status()
             thumbnail = r_thumbnail.content
             bc.upload_blob(
@@ -315,7 +315,7 @@ def do_one(
         context = copy_item(mosaic_info, quad_info, asset_credential=asset_credential)
         result = dataclasses.replace(record, state="finished", context=context)
     except Exception as e:
-        context = {"traceback": traceback.format_traceback(e)}
+        context = {"traceback": traceback.format_tb(e)}
         result = dataclasses.replace(record, state="error", context=context)
 
     etl_table_client.upsert_entity(result.entity)
@@ -488,6 +488,7 @@ def initialize(
     etl_table_credential: str | azure.core.credentials.AzureSasCredential | None = None,
 ):
     """Initialize the per-item records"""
+    # TODO: this can use requester_id now.
     table_client = get_table_client("etl", etl_table_credential)
     item_quads = load_quads(geometry, quads_table_credential)
     mosaic_names = mosaics_for_date_range(start_datetime, end_datetime)
