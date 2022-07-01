@@ -391,7 +391,7 @@ def process_mosaic_item_info_pairs(
                 if future.status == "finished":
                     success.append(record)
                 else:
-                    logger.warning("Error", record)
+                    logger.warning("Error %s", record)
                     errors.append(record)
     gateway.stop_cluster(cluster.name)
 
@@ -510,6 +510,7 @@ def initialize(
 
     batches = tlz.partition_all(100, records)
     total = len(records) // 100
+    logger.info("Initializing %d records with run_id=%s", len(records), run_id)
     for batch in tqdm.tqdm(batches, total=total):
         operations = [("upsert", record.entity) for record in batch]
         table_client.submit_transaction(operations)
