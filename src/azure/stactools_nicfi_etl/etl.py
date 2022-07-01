@@ -113,12 +113,13 @@ class PlanetNICFIRecord(ETLRecord):
         )
 
     @classmethod
-    def from_entity(cls, entity):
+    def from_entity(cls, entity, **kwargs):
         d = dict(entity)
         d.setdefault("context", "{}")
         d["partition_key"] = d.pop("PartitionKey")
         d["row_key"] = d.pop("RowKey")
         d["context"] = json.loads(d["context"])
+        d.update(kwargs)
         return cls(**d)
 
     @property
@@ -458,7 +459,7 @@ def process_initialized(
     """
     table_client = get_table_client("etl", etl_table_credential)
     records = (
-        PlanetNICFIRecord.from_entity(x)
+        PlanetNICFIRecord.from_entity(x, planet_api_key=planet_api_key)
         for x in table_client.query_entities(f"state eq 'initialized' and run_id eq '{run_id}'")
         # TODO: filter on run ID too
     )
@@ -504,6 +505,7 @@ def initialize(
                     row_key="_".join([mosaic_info["id"], quad_info["id"]]),
                     state="initialized",
                     run_id=run_id,
+                    planet_api_key=planet_api_key,
                     context={},
                 )
             )
