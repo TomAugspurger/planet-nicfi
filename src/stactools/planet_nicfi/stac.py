@@ -64,7 +64,7 @@ def create_collection(
                 pystac.ProviderRole.PROCESSOR,
                 pystac.ProviderRole.PRODUCER,
                 pystac.ProviderRole.LICENSOR,
-            ]
+            ],
         )
     ]
     if extra_providers:
@@ -212,17 +212,30 @@ def create_item(
     )
     session.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
 
-    r_mosaic = session.get(mosaic_info_href)
+    r_mosaic = session.get(mosaic_info_href, timeout=10)
     r_mosaic.raise_for_status()
     mosaic = r_mosaic.json()
 
-    r_quad = session.get(quad_info_href)
+    r_quad = session.get(quad_info_href, timeout=10)
     r_quad.raise_for_status()
     item_info = r_quad.json()
 
-    r_image = requests.get(transform_href(asset_href))
-    r_image.raise_for_status()
-    image = r_image.content
+    timeout_error = None
+    for i in range(1, 6):
+        logger.info("Reading data [try %d / 5]", i)
+        try:
+            r_image = session.get(transform_href(asset_href), timeout=90)
+            r_image.raise_for_status()
+            image = r_image.content
+        except requests.exceptions.ReadTimeout as e:
+            timeout_error = e
+            continue
+        else:
+            # no timeout
+            break
+    else:
+        # no break, timed out too many times
+        raise requests.exceptions.ReadTimeout(timeout_error, request=r_image.request)
     return create_item_from_data(asset_href, image, mosaic, item_info)
 
 
